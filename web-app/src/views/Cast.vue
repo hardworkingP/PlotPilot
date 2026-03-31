@@ -203,7 +203,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import GraphChart from '../components/charts/GraphChart.vue'
 import { convertGraph, type VisNode, type VisEdge, type EChartsNode, type EChartsLink } from '../utils/visToEcharts'
+import { bibleApi } from '../api/bible'
 import { bookApi } from '../api/book'
+
+// NOTE: This component uses both APIs:
+// - bibleApi: Reserved for future simple character operations (list, add)
+// - bookApi: All cast graph operations (getCast, putCast, getCastCoverage, searchCast)
+// Currently all operations are complex graph manipulations, so bookApi is used exclusively.
 
 interface StoryEventRow {
   id: string
