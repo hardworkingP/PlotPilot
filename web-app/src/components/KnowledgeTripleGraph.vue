@@ -18,6 +18,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { bookApi } from '../api/book'
+import { knowledgeApi } from '../api/knowledge'
 import GraphChart from './charts/GraphChart.vue'
 import { convertGraph, type VisNode, type VisEdge, type EChartsGraphData } from '../utils/visToEcharts'
 
@@ -104,7 +105,7 @@ const redraw = async () => {
 const reload = async () => {
   loading.value = true
   try {
-    const res = await bookApi.getKnowledge(props.slug)
+    const res = await knowledgeApi.getKnowledge(props.slug)
     facts.value = (res.facts || []) as Fact[]
     await redraw()
   } catch (error) {

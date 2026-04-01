@@ -249,6 +249,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { bookApi } from '../api/book'
+import { knowledgeApi } from '../api/knowledge'
 import CastGraphCompact from './CastGraphCompact.vue'
 import KnowledgeTripleGraph from './KnowledgeTripleGraph.vue'
 
@@ -296,7 +297,7 @@ const doSearch = async () => {
   if (!q) return
   searching.value = true
   try {
-    const r = await bookApi.knowledgeSearch(props.slug, q, 8)
+    const r = await knowledgeApi.searchKnowledge(props.slug, q, 8)
     searchHits.value = r.hits || []
     selectedHit.value = searchHits.value[0] || null
   } catch (e: any) {
@@ -342,7 +343,7 @@ const loadOutlineTitles = async () => {
 
 const load = async () => {
   try {
-    const k = await bookApi.getKnowledge(props.slug)
+    const k = await knowledgeApi.getKnowledge(props.slug)
     data.value = {
       version: k.version ?? 1,
       premise_lock: k.premise_lock || '',
@@ -376,7 +377,7 @@ const load = async () => {
 const save = async () => {
   saving.value = true
   try {
-    await bookApi.putKnowledge(props.slug, {
+    await knowledgeApi.updateKnowledge(props.slug, {
       ...data.value,
       chapters: sortedChapters.value.map(c => ({
         ...c,

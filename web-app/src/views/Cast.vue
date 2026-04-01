@@ -203,13 +203,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import GraphChart from '../components/charts/GraphChart.vue'
 import { convertGraph, type VisNode, type VisEdge, type EChartsNode, type EChartsLink } from '../utils/visToEcharts'
-import { bibleApi } from '../api/bible'
-import { bookApi } from '../api/book'
-
-// NOTE: This component uses both APIs:
-// - bibleApi: Reserved for future simple character operations (list, add)
-// - bookApi: All cast graph operations (getCast, putCast, getCastCoverage, searchCast)
-// Currently all operations are complex graph manipulations, so bookApi is used exclusively.
+import { castApi } from '../api/cast'
 
 interface StoryEventRow {
   id: string
@@ -431,7 +425,7 @@ const handleEdgeClick = (link: EChartsLink) => {
 const loadCoverage = async () => {
   covLoading.value = true
   try {
-    coverage.value = await bookApi.getCastCoverage(slug)
+    coverage.value = await castApi.getCastCoverage(slug)
   } catch {
     coverage.value = null
   } finally {
@@ -450,7 +444,7 @@ const goChapter = (cid: number) => {
 
 const reload = async () => {
   try {
-    const data = await bookApi.getCast(slug)
+    const data = await castApi.getCast(slug)
     graph.value = {
       characters: data.characters || [],
       relationships: data.relationships || [],
@@ -473,7 +467,7 @@ const onSearch = () => {
       return
     }
     try {
-      const res = await bookApi.searchCast(slug, q)
+      const res = await castApi.searchCast(slug, q)
       const ids = new Set<string>()
       const chList = (res.characters || []) as CastCharacter[]
       const relList = (res.relationships || []) as CastRelationship[]
@@ -563,7 +557,7 @@ const removeRelationship = () => {
 const saveAll = async () => {
   saving.value = true
   try {
-    await bookApi.putCast(slug, {
+    await castApi.putCast(slug, {
       version: 2,
       characters: graph.value.characters,
       relationships: graph.value.relationships,

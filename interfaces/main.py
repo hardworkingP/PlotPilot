@@ -5,7 +5,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from interfaces.api.v1 import novels, chapters, bible, ai
+from interfaces.api.v1 import novels, chapters, bible, cast, ai, knowledge, chat
 from web.routers.stats import create_stats_router
 from web.services.stats_service import StatsService
 from web.repositories.stats_repository_adapter import StatsRepositoryAdapter
@@ -21,7 +21,7 @@ app = FastAPI(
 # 配置 CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:3001", "http://localhost:3002"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,7 +31,10 @@ app.add_middleware(
 app.include_router(novels.router, prefix="/api/v1")
 app.include_router(chapters.router, prefix="/api/v1")
 app.include_router(bible.router, prefix="/api/v1")
+app.include_router(cast.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
+app.include_router(knowledge.router, prefix="/api/v1")
+app.include_router(chat.router, prefix="/api/v1")
 
 # 注册统计路由（使用适配器连接新架构）
 from pathlib import Path

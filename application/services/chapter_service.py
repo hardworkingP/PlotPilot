@@ -85,3 +85,50 @@ class ChapterService:
             chapter_id: 章节 ID
         """
         self.chapter_repository.delete(ChapterId(chapter_id))
+
+    def get_chapter_by_novel_and_number(
+        self,
+        novel_id: str,
+        chapter_number: int
+    ) -> Optional[ChapterDTO]:
+        """根据小说 ID 和章节号获取章节
+
+        Args:
+            novel_id: 小说 ID
+            chapter_number: 章节号
+
+        Returns:
+            ChapterDTO 或 None
+        """
+        chapters = self.chapter_repository.list_by_novel(NovelId(novel_id))
+        for chapter in chapters:
+            if chapter.number == chapter_number:
+                return ChapterDTO.from_domain(chapter)
+        return None
+
+    def update_chapter_by_novel_and_number(
+        self,
+        novel_id: str,
+        chapter_number: int,
+        content: str
+    ) -> Optional[ChapterDTO]:
+        """根据小说 ID 和章节号更新章节内容
+
+        Args:
+            novel_id: 小说 ID
+            chapter_number: 章节号
+            content: 新内容
+
+        Returns:
+            更新后的 ChapterDTO 或 None
+
+        Raises:
+            EntityNotFoundError: 如果章节不存在
+        """
+        chapters = self.chapter_repository.list_by_novel(NovelId(novel_id))
+        for chapter in chapters:
+            if chapter.number == chapter_number:
+                chapter.update_content(content)
+                self.chapter_repository.save(chapter)
+                return ChapterDTO.from_domain(chapter)
+        raise EntityNotFoundError("Chapter", f"{novel_id}/chapter-{chapter_number}")

@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "premise_lock": "Test premise for API",
+  "chapters": [
+    {
+      "chapter_id": 1,
+      "summary": "First chapter summary",
+      "key_events": "Key events here",
+      "open_threads": "Open threads",
+      "consistency_note": "Consistency note",
+      "beat_sections": [
+        "Beat 1",
+        "Beat 2"
+      ],
+      "sync_status": "draft"
+    }
+  ],
+  "facts": [
+    {
+      "id": "fact_001",
+      "subject": "Protagonist",
+      "predicate": "is",
+      "object": "Developer",
+      "chapter_id": 1,
+      "note": "Main character"
+    }
+  ]
+}

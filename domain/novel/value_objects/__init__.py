@@ -11,6 +11,9 @@ from domain.novel.value_objects.foreshadowing import (
 )
 from domain.novel.value_objects.novel_event import NovelEvent, EventType
 from domain.novel.value_objects.event_timeline import EventTimeline
+from domain.novel.value_objects.storyline_type import StorylineType
+from domain.novel.value_objects.storyline_status import StorylineStatus
+from domain.novel.value_objects.storyline_milestone import StorylineMilestone
 
 __all__ = [
     "ChapterContent",
@@ -26,4 +29,7 @@ __all__ = [
     "NovelEvent",
     "EventType",
     "EventTimeline",
+    "StorylineType",
+    "StorylineStatus",
+    "StorylineMilestone",
 ]

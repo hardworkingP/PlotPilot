@@ -1,0 +1,44 @@
+"""Knowledge DTOs"""
+from typing import List, Optional
+from pydantic import BaseModel, Field
+
+
+class ChapterSummaryDTO(BaseModel):
+    """章节摘要 DTO"""
+    chapter_id: int = Field(..., description="章节号")
+    summary: str = Field(default="", description="章末总结")
+    key_events: str = Field(default="", description="关键事件")
+    open_threads: str = Field(default="", description="未解问题")
+    consistency_note: str = Field(default="", description="一致性说明")
+    beat_sections: List[str] = Field(default_factory=list, description="节拍列表")
+    sync_status: str = Field(default="draft", description="同步状态")
+
+
+class KnowledgeTripleDTO(BaseModel):
+    """知识三元组 DTO"""
+    id: str = Field(..., description="三元组ID")
+    subject: str = Field(default="", description="主语")
+    predicate: str = Field(default="", description="谓词")
+    object: str = Field(default="", description="宾语")
+    chapter_id: Optional[int] = Field(default=None, description="章节号")
+    note: str = Field(default="", description="备注")
+
+
+class StoryKnowledgeDTO(BaseModel):
+    """故事知识 DTO"""
+    version: int = Field(default=1, description="数据版本")
+    premise_lock: str = Field(default="", description="梗概锁定")
+    chapters: List[ChapterSummaryDTO] = Field(default_factory=list, description="章节摘要列表")
+    facts: List[KnowledgeTripleDTO] = Field(default_factory=list, description="知识三元组列表")
+
+
+class KnowledgeSearchHitDTO(BaseModel):
+    """知识搜索结果项 DTO"""
+    id: str = Field(..., description="结果ID")
+    text: str = Field(..., description="文本内容")
+    meta: Optional[dict] = Field(default=None, description="元数据")
+
+
+class KnowledgeSearchResponseDTO(BaseModel):
+    """知识搜索响应 DTO"""
+    hits: List[KnowledgeSearchHitDTO] = Field(default_factory=list, description="搜索结果列表")

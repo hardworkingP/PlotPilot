@@ -159,7 +159,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { useMessage } from 'naive-ui'
-import { chatApi } from '../../api/book'
+import { chatApi } from '../../api/chat'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import type { ChapterListItem, ChatMessage } from '../../types/api'
