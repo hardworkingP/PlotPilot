@@ -5,9 +5,12 @@
         <h2 class="work-title">{{ bookTitle || slug }}</h2>
         <n-text depth="3" class="work-sub">{{ slug }}</n-text>
       </div>
-      <n-space :size="12" align="center" wrap class="work-header-actions">
-        <n-button type="primary" size="small" @click="openHostedWriteModal">
+      <n-space :size="8" align="center" wrap class="work-header-actions">
+        <n-button size="small" secondary @click="openHostedWriteModal">
           托管连写
+        </n-button>
+        <n-button type="primary" size="small" @click="showWorkflowModal = true" title="完整工作流：场景分析 + 流式生成 + 一致性检验，推荐">
+          📖 工作流撰稿
         </n-button>
       </n-space>
     </header>
@@ -467,6 +470,16 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 完整工作流撰稿弹窗（场景分析 + 流式 + 一致性报告） -->
+    <GenerateChapterWorkflowModal
+      v-model:show="showWorkflowModal"
+      :slug="slug"
+      :chapters="chapters"
+      :default-chapter-id="currentChapterId"
+      @saved="emit('chapterUpdated')"
+      @plan-act="(_actId, _actTitle) => emit('setRightPanel', 'bible')"
+    />
   </div>
 </template>
 
@@ -486,6 +499,7 @@ import { tensionApi } from '../../api/tools'
 import type { TensionDiagnosis } from '../../api/tools'
 import { planningApi } from '../../api/planning'
 import type { ContinuePlanResult } from '../../api/planning'
+import GenerateChapterWorkflowModal from './GenerateChapterWorkflowModal.vue'
 
 interface Chapter {
   id: number
@@ -521,6 +535,7 @@ const message = useMessage()
 
 const rightPanel = ref('bible')
 const showHostedModal = ref(false)
+const showWorkflowModal = ref(false)
 const showGenerateModal = ref(false)
 const generateOutline = ref('')
 const generatedContent = ref('')
