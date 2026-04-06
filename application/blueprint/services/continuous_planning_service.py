@@ -60,6 +60,9 @@ class ContinuousPlanningService:
         structure_preference: Dict[str, int]
     ) -> Dict:
         """生成宏观规划"""
+        import time
+        start_time = time.time()
+
         print(f"[DEBUG] 开始生成宏观规划: novel_id={novel_id}, target_chapters={target_chapters}")
         logger.info(f"Generating macro plan for novel {novel_id}")
 
@@ -85,9 +88,130 @@ class ContinuousPlanningService:
         print(f"[DEBUG] LLM 响应内容: {response}")
         structure = self._parse_llm_response(response)
 
+        # 评估规划质量
+        elapsed_time = time.time() - start_time
+        quality_metrics = self._evaluate_macro_plan_quality(
+            structure=structure,
+            bible_context=bible_context,
+            target_chapters=target_chapters,
+            structure_preference=structure_preference
+        )
+
+        logger.info(f"[MacroPlanQuality] novel={novel_id}, time={elapsed_time:.2f}s, metrics={quality_metrics}")
+
         return {
             "success": True,
-            "structure": structure.get("parts", [])
+            "structure": structure.get("parts", []),
+            "quality_metrics": quality_metrics,
+            "generation_time": elapsed_time
+        }
+
+    def _evaluate_macro_plan_quality(
+        self,
+        structure: Dict,
+        bible_context: Dict,
+        target_chapters: int,
+        structure_preference: Dict[str, int]
+    ) -> Dict:
+        """评估宏观规划质量
+
+        用于持续优化提示词效果，记录关键指标：
+        - 结构完整性：部/卷/幕数量是否符合预期
+        - 世界观融合度：Bible 元素在结构中的出现比例
+        - 冲突密度：每幕是否有明确的冲突描述
+        - 标题质量：标题长度、词汇多样性等
+        """
+        parts = structure.get("parts", [])
+
+        # 基础统计
+        part_count = len(parts)
+        volume_count = sum(len(p.get("volumes", [])) for p in parts)
+        act_count = sum(
+            len(v.get("acts", []))
+            for p in parts
+            for v in p.get("volumes", [])
+        )
+
+        # 检查结构偏好匹配度
+        expected_parts = structure_preference.get("parts") if structure_preference else None
+        structure_match = {
+            "parts_match": expected_parts is None or part_count == expected_parts,
+            "expected_parts": expected_parts,
+            "actual_parts": part_count
+        }
+
+        # 收集所有幕
+        all_acts = []
+        for p in parts:
+            for v in p.get("volumes", []):
+                all_acts.extend(v.get("acts", []))
+
+        # 评估冲突密度
+        acts_with_conflict = sum(
+            1 for a in all_acts
+            if a.get("core_conflict") and len(a.get("core_conflict", "")) > 10
+        )
+        conflict_density = acts_with_conflict / len(all_acts) if all_acts else 0
+
+        # 评估世界观融合度
+        bible_chars = {c.get("name", "").lower() for c in bible_context.get("characters", [])}
+        bible_locations = {l.get("name", "").lower() for l in bible_context.get("locations", [])}
+
+        char_mentions = 0
+        location_mentions = 0
+        for act in all_acts:
+            desc = act.get("description", "").lower()
+            title = act.get("title", "").lower()
+            text = desc + " " + title
+
+            for char in bible_chars:
+                if char and char in text:
+                    char_mentions += 1
+                    break
+
+            for loc in bible_locations:
+                if loc and loc in text:
+                    location_mentions += 1
+                    break
+
+        world_fusion = {
+            "character_coverage": char_mentions / len(all_acts) if all_acts else 0,
+            "location_coverage": location_mentions / len(all_acts) if all_acts else 0
+        }
+
+        # 评估标题质量
+        titles = [a.get("title", "") for a in all_acts]
+        avg_title_length = sum(len(t) for t in titles) / len(titles) if titles else 0
+
+        # 检查标题是否包含动词（简单启发式）
+        action_words = ["战", "杀", "破", "夺", "逃", "追", "救", "毁", "变", "觉醒", "背叛", "降临", "崛起", "坠落", "燃烧", "冻结", "撕裂", "缝合"]
+        titles_with_action = sum(1 for t in titles if any(w in t for w in action_words))
+        title_action_ratio = titles_with_action / len(titles) if titles else 0
+
+        # 检查是否有情绪反转字段（新提示词特性）
+        acts_with_emotion = sum(1 for a in all_acts if a.get("emotional_turn"))
+        emotion_field_ratio = acts_with_emotion / len(all_acts) if all_acts else 0
+
+        return {
+            "structure_stats": {
+                "parts": part_count,
+                "volumes": volume_count,
+                "acts": act_count
+            },
+            "structure_match": structure_match,
+            "conflict_density": round(conflict_density, 2),
+            "world_fusion": {
+                "character_coverage": round(world_fusion["character_coverage"], 2),
+                "location_coverage": round(world_fusion["location_coverage"], 2)
+            },
+            "title_quality": {
+                "avg_length": round(avg_title_length, 1),
+                "action_word_ratio": round(title_action_ratio, 2)
+            },
+            "prompt_version_features": {
+                "emotional_turn_field": round(emotion_field_ratio, 2),
+                "key_characters_field": round(sum(1 for a in all_acts if a.get("key_characters")) / len(all_acts), 2) if all_acts else 0
+            }
         }
 
     async def confirm_macro_plan(self, novel_id: str, structure: List[Dict]) -> Dict:
@@ -707,63 +831,156 @@ class ContinuousPlanningService:
         return {"part_chapters": part_chapters, "part_ratios": part_ratios}
 
     def _build_quick_macro_prompt(self, bible_context: Dict, target_chapters: int) -> Prompt:
-        """极速模式：破城槌提示词
+        """极速模式：破城槌提示词 V2
 
         设计哲学：
-        - 允许AI犯错，用"粗糙的泥胚"激发作者的对抗欲
-        - 强调商业爆点、极端冲突、套路化节奏
-        - 不给章数限制，让AI撒欢去写
+        - AI 自主决定最优结构（部/卷/幕数量），不再固定 3×3×3
+        - 深度融合 Bible 设定（角色关系、地点、时间线）
+        - 引入经典叙事理论（三幕剧、英雄之旅）指导结构
+        - 强化冲突设计和情绪曲线
         """
         system_msg = """# 角色设定
-你是一位狂热且极具市场敏锐度的顶级网文主编，精通"退婚流"、"克苏鲁修仙"、"赛博朋克反乌托邦"等各种爆款商业节奏。你的任务是帮作者打破"白纸恐惧"，利用他给出的寥寥几个设定，瞬间推演填补出一个完整、宏大、且充满极端冲突的长篇叙事骨架。
+你是一位狂热且极具市场敏锐度的顶级网文主编，精通"退婚流"、"克苏鲁修仙"、"赛博朋克反乌托邦"等各种爆款商业节奏。你的任务是帮作者打破"白纸恐惧"，利用他给出的世界观设定，瞬间推演填补出一个完整、宏大、且充满极端冲突的长篇叙事骨架。
 
-# 核心推演铁律（The Icebreaker Rules）
+# 叙事结构理论指导
+<STORY_THEORY>
+你设计的结构应符合以下经典叙事原理：
+1. 三幕剧结构：Setup（设定）→ Confrontation（对抗）→ Resolution（解决）
+2. 英雄之旅：平凡世界→冒险召唤→试炼→深渊→蜕变→归来
+3. 情绪曲线：开篇抓人→中段起伏（小高潮间隔3-5幕）→终局爆发
+4. 钩子密度：每部结尾必须有大悬念，每卷结尾有中等悬念，每幕结尾有小悬念
+</STORY_THEORY>
+
+# 核心推演铁律（The Icebreaker Rules V2）
 <CONSTRAINTS>
-1. 极致冲突：每一部、每一卷的结尾，必须有一个生死攸关、或世界观颠覆的"大悬念"。绝不要写平淡的日常过渡！
-2. 允许刻板印象：为了快速建立骨架，你可以大胆使用经典的商业套路（如：挚友背叛、深渊凝视、高维降临、底层的逆袭反杀），但必须披上作者给定的世界观外衣。
-3. 粗线条描绘：不要纠结具体的章节字数，用极具煽动性和画面感的语言描述每一幕的【核心事件】和【情绪反转】。
-4. 商业节奏：第一部快速抛出核心悬念，第二部制造中段危机（主角信念崩溃或次要反派崛起），第三部爆发式收网。
+1. 【结构自主】根据目标篇幅智能决定部/卷/幕数量：
+   - 短篇（<50章）：建议1-2部，每部2-3卷，每卷2-4幕
+   - 中篇（50-200章）：建议3部，每部2-4卷，每卷3-5幕
+   - 长篇（200-500章）：建议3-5部，每部3-5卷，每卷3-5幕
+   - 史诗（>500章）：建议5部+，每部3-6卷，每卷4-6幕
+
+2. 【极致冲突】每一幕必须包含：
+   - 核心对抗（谁 vs 谁）
+   - 赌注（失败会失去什么）
+   - 转折（预期违背）
+   绝不要写平淡的日常过渡！
+
+3. 【世界观融合】必须深度融合提供的设定：
+   - 主要角色必须出现在至少30%的幕中
+   - 关键地点必须承担叙事功能（不仅是背景）
+   - 时间线事件必须影响情节走向
+
+4. 【商业节奏】
+   - 第一部：3幕内抛出核心悬念，建立主角目标
+   - 中间部：每2-3幕一个小高潮，主角经历重大失败/觉醒
+   - 最后一部：节奏加快，所有伏笔收束，终极对决
+
+5. 【标题质量】每个标题必须：
+   - 有画面感（动词+名词，如"血染青铜门"）
+   - 暗示冲突（含对抗性词汇）
+   - 引发好奇（非常规组合）
 </CONSTRAINTS>
 
-# 输出要求
-请直接输出JSON格式，严格包含3部，每部3卷，每卷3幕（共27幕）。
-每幕（Act）的输出字段必须包含：
-- "title": "具有商业爆点的幕标题（如：血染青铜门）"
-- "core_conflict": "谁对抗谁？赌注是什么？（如：李明 vs 财阀执法队，赌注是妹妹的机械心脏）"
-- "description": "一句话概括本幕发生了什么极具张力的事件"
+# 输出格式
+请直接输出JSON，包含以下字段：
+- "parts": 部列表，每部含 "title", "volumes"
+- "volumes": 卷列表，每卷含 "title", "acts"
+- "acts": 幕列表，每幕必须含：
+  - "title": 具有商业爆点的幕标题
+  - "core_conflict": "谁 vs 谁，赌注是什么"
+  - "emotional_turn": "情绪反转（如：从希望到绝望）"
+  - "description": "情节摘要（含转折）"
+  - "key_characters": ["角色ID或名称"]（本幕涉及的关键角色）
+  - "key_locations": ["地点ID或名称"]（本幕发生的关键地点）
 
-不要添加任何解释性文字，不要询问额外信息。"""
+不要添加任何解释性文字。"""
 
-        # 构建世界观上下文
-        worldview_context = "【世界观与人物】\n"
+        # 构建丰富的世界观上下文
+        context_parts = []
+
+        # 世界观
         if bible_context.get("worldview"):
-            worldview_context += f"世界观：{bible_context['worldview']}\n"
+            context_parts.append(f"【世界观】\n{bible_context['worldview']}\n")
+
+        # 角色（带关系和弧光）
         if bible_context.get("characters"):
-            char_names = [c.get('name', 'Unknown') for c in bible_context['characters'][:3]]
-            worldview_context += f"主要人物：{', '.join(char_names)}\n"
+            chars = bible_context['characters']
+            char_lines = ["【角色设定】"]
+            for c in chars[:5]:  # 限制主要角色数量
+                name = c.get('name', 'Unknown')
+                desc = c.get('description', '')
+                role = c.get('role', '')
+                arc = c.get('character_arc', '')
+                char_lines.append(f"- {name} ({role}): {desc}")
+                if arc:
+                    char_lines.append(f"  人物弧光: {arc}")
+            context_parts.append("\n".join(char_lines) + "\n")
 
-        if worldview_context == "【世界观与人物】\n":
-            worldview_context = "【世界观与人物】\n暂无详细设定，请基于通用的商业小说套路生成结构。\n"
+        # 角色关系
+        if bible_context.get("relationships"):
+            rel_lines = ["【角色关系】"]
+            for r in bible_context['relationships'][:5]:
+                char1 = r.get('character1', '')
+                char2 = r.get('character2', '')
+                rel_type = r.get('relationship_type', '')
+                rel_desc = r.get('description', '')
+                rel_lines.append(f"- {char1} ↔ {char2} ({rel_type}): {rel_desc}")
+            context_parts.append("\n".join(rel_lines) + "\n")
 
-        user_msg = f"""<WORLDVIEW_AND_PROTAGONIST>
+        # 地点（带叙事功能）
+        if bible_context.get("locations"):
+            loc_lines = ["【关键地点】"]
+            for l in bible_context['locations'][:5]:
+                name = l.get('name', 'Unknown')
+                desc = l.get('description', '')
+                significance = l.get('significance', '')
+                loc_lines.append(f"- {name}: {desc}")
+                if significance:
+                    loc_lines.append(f"  叙事意义: {significance}")
+            context_parts.append("\n".join(loc_lines) + "\n")
+
+        # 时间线事件
+        if bible_context.get("timeline_notes"):
+            time_lines = ["【时间线事件】"]
+            for t in bible_context['timeline_notes'][:5]:
+                event = t.get('event', '')
+                desc = t.get('description', '')
+                impact = t.get('impact', '')
+                time_lines.append(f"- {event}: {desc}")
+                if impact:
+                    time_lines.append(f"  情节影响: {impact}")
+            context_parts.append("\n".join(time_lines) + "\n")
+
+        if not context_parts:
+            context_parts.append("【世界观与人物】\n暂无详细设定，请基于通用的商业小说套路生成结构，但仍需保持结构灵活和冲突极致。\n")
+
+        worldview_context = "\n".join(context_parts)
+
+        user_msg = f"""<STORY_CONTEXT>
 {worldview_context}
-</WORLDVIEW_AND_PROTAGONIST>
+</STORY_CONTEXT>
 
-目标篇幅：约 {target_chapters} 章（供参考，不必精确分配）
+<TARGET_SCOPE>
+目标总篇幅：约 {target_chapters} 章
+请根据此篇幅智能设计部/卷/幕数量，不必拘泥于固定网格。
+</TARGET_SCOPE>
 
-请立即生成3部×3卷×3幕=27幕的叙事骨架，JSON格式：
+请立即生成叙事骨架，严格按以下JSON格式输出：
 {{
   "parts": [
     {{
-      "title": "部标题（如：起源之章）",
+      "title": "部标题（如：深渊觉醒）",
       "volumes": [
         {{
-          "title": "卷标题（如：觉醒）",
+          "title": "卷标题（如：血色的黎明）",
           "acts": [
             {{
-              "title": "幕标题（如：血染青铜门）",
-              "core_conflict": "冲突描述",
-              "description": "情节摘要"
+              "title": "幕标题（如：青铜门下的背叛）",
+              "core_conflict": "主角 vs 反派，赌注是...",
+              "emotional_turn": "从...到...",
+              "description": "情节摘要...",
+              "key_characters": ["角色1", "角色2"],
+              "key_locations": ["地点1"]
             }}
           ]
         }}
@@ -774,42 +991,94 @@ class ContinuousPlanningService:
         return Prompt(system=system_msg, user=user_msg)
 
     def _build_precise_macro_prompt(self, bible_context: Dict, target_chapters: int, structure_preference: Dict) -> Prompt:
-        """精密模式：手术刀提示词
+        """精密模式：手术刀提示词 V2
 
         设计哲学：
         - 捍卫创作者的绝对主权与节奏感
         - 严格遵守用户指定的结构网格和字数节奏
         - 强调逻辑严密、中段支撑、情节容量匹配
+        - 深度融合 Bible 设定进行精密推演
+        - 引入叙事理论确保结构合理性
         """
         parts = structure_preference.get('parts', 3)
         volumes_per_part = structure_preference.get('volumes_per_part', 3)
         acts_per_volume = structure_preference.get('acts_per_volume', 3)
+        total_acts = parts * volumes_per_part * acts_per_volume
 
         # 计算章数分配
         distribution = self._calculate_chapter_distribution(target_chapters, parts)
         part_chapters = distribution["part_chapters"]
 
+        # 计算每幕平均章数
+        avg_chapters_per_act = target_chapters // total_acts if total_acts > 0 else 5
+
         # 构建动态章节配额指示
         pacing_guide = "<PACING_GUIDE>\n"
         for i, chapters in enumerate(part_chapters, 1):
             if i == 1:
-                pacing_guide += f"- 第{i}部（起源）：分配 {chapters} 章。情节要求：紧凑、抛出核心悬念。\n"
+                pacing_guide += f"- 第{i}部（起源）：分配 {chapters} 章。情节要求：紧凑、抛出核心悬念、建立主角目标。\n"
             elif i == parts:
-                pacing_guide += f"- 第{i}部（决战）：分配 {chapters} 章。情节要求：收束所有主线，节奏极快。\n"
+                pacing_guide += f"- 第{i}部（决战）：分配 {chapters} 章。情节要求：收束所有主线、终极对决、情绪爆发。\n"
             else:
-                pacing_guide += f"- 第{i}部（发展/深渊）：分配 {chapters} 章。情节要求：容量极大，需要多方势力博弈。\n"
-        pacing_guide += "</PACING_GUIDE>"
+                pacing_guide += f"- 第{i}部（发展/深渊）：分配 {chapters} 章。情节要求：容量极大、多线叙事、主角重大转变。\n"
+        pacing_guide += f"</PACING_GUIDE>\n\n<ACT_PACING>\n"
+        pacing_guide += f"- 总幕数：{total_acts} 幕\n"
+        pacing_guide += f"- 平均每幕：约 {avg_chapters_per_act} 章\n"
+        pacing_guide += f"- 节奏建议：前1/3幕数铺垫，中1/3幕数发展+小高潮，后1/3幕数爆发+收束\n"
+        pacing_guide += "</ACT_PACING>"
 
         system_msg = f"""# 角色设定
-你是一位极其理性的长篇小说结构架构师。作者正在进行一项严密的叙事工程。他设定了极其精确的篇幅限制和结构分布。你的任务是像外科手术一样，在严格遵守作者给定的"结构网格"和"字数节奏"的前提下，分配情节张力，确保中段不塌陷，高潮不疲软。
+你是一位极其理性的长篇小说结构架构师，精通经典叙事理论和现代网文节奏。作者正在进行一项严密的叙事工程，设定了精确的篇幅限制和结构分布。你的任务是像外科手术一样，在严格遵守"结构网格"和"字数节奏"的前提下，深度融合世界观设定，分配情节张力，确保中段不塌陷，高潮不疲软。
 
-# 精密推演铁律（The Scalpel Rules）
+# 叙事理论框架
+<STORY_THEORY>
+1. 三幕剧结构映射：
+   - 第1部 ≈ 第一幕（设定）：主角现状→触发事件→拒绝改变→跨越门槛
+   - 中间部 ≈ 第二幕（对抗）：试炼与盟友→深入深渊→核心考验
+   - 最后部 ≈ 第三幕（解决）：回归→终极对决→新世界
+
+2. 情绪曲线设计：
+   - 每部内部：起→承→转→合
+   - 幕间关系：悬念→揭示→更大悬念
+   - 高潮分布：每部1个大高潮，每卷1个中高潮，每2-3幕1个小高潮
+
+3. 角色弧光整合：
+   - 主角必须在结构节点处经历关键转变
+   - 反派势力应随幕推进逐步显露/强化
+   - 配角应在特定幕完成其叙事功能
+</STORY_THEORY>
+
+# 精密推演铁律（The Scalpel Rules V2）
 <CONSTRAINTS>
-1. 节奏匹配：系统已为你计算好每部的【预估章数配额】（见下方指示）。你设计的情节容量，必须能撑起这个章数！
-   - 例如：如果某部分配了150章，你必须设计【多线叙事】或【复杂的长线副本】；如果某部只有30章，情节必须是【单线程的快速高潮】。
-2. 逻辑严密：严禁使用突兀的机械降神。所有的转折必须基于现有的设定进行逻辑推演。
-3. 中段支撑：在中间部分（非首尾）必须设计"次要反派的崛起"或"主角信念的暂时崩溃"，以维持长篇连载的订阅张力。
-4. 结构网格绝对服从：必须严格输出 {parts} 部 × {volumes_per_part} 卷/部 × {acts_per_volume} 幕/卷，不得多一个或少一个节点。
+1. 【结构网格绝对服从】
+   必须严格输出 {parts} 部 × {volumes_per_part} 卷/部 × {acts_per_volume} 幕/卷 = {total_acts} 幕，不得多一个或少一个节点。
+
+2. 【节奏匹配】
+   系统已为你计算好每部的【预估章数配额】。你设计的情节容量必须能撑起这个章数：
+   - 高章数配额（>100章/部）：必须设计【多线叙事】+【复杂长线副本】+【势力博弈】
+   - 中章数配额（50-100章/部）：设计【主线+1-2条副线】+【阶段性目标】
+   - 低章数配额（<50章/部）：情节必须是【单线程快速推进】+【紧凑冲突】
+
+3. 【世界观深度融合】
+   - 主要角色必须出现在具体幕中，标注其在该幕的角色功能（主角/反派/盟友/阻碍者）
+   - 关键地点必须承担具体叙事功能（不仅是背景，而是冲突发生地/转折点）
+   - 时间线事件必须与幕结构对齐（某幕必须解决某事件，或某事件触发某幕）
+   - 角色关系必须在幕中体现（某幕聚焦某对关系的转变）
+
+4. 【逻辑严密性】
+   - 严禁机械降神：所有解决必须基于已铺垫的能力/资源
+   - 因果清晰：每一幕的结果必须是下一幕的前提
+   - 伏笔呼应：早期幕埋下的线索必须在后期幕回收
+
+5. 【中段支撑】
+   - 中间部分必须设计"次要反派的崛起"或"主角信念的暂时崩溃"
+   - 每3-4幕必须有一个情绪转折点（希望→绝望，或反之）
+   - 避免"中段塌陷"：确保中间幕的冲突强度不低于首尾
+
+6. 【章数分配】
+   - 每幕必须标注 estimated_chapters（参考平均每幕{avg_chapters_per_act}章）
+   - 重要幕（转折点、高潮）可分配更多章数
+   - 过渡幕可分配较少章数，但必须有冲突推进
 </CONSTRAINTS>
 
 {pacing_guide}
@@ -817,26 +1086,81 @@ class ContinuousPlanningService:
 # 输出要求
 请直接输出JSON格式，层级必须严格吻合结构网格。
 每幕（Act）的输出字段必须包含：
-- "title": "精准的情节标题"
-- "estimated_chapters": 本幕预计占用的章数（请参考<PACING_GUIDE>合理分配）
-- "narrative_goal": "本幕在整个故事结构中承担的叙事功能（如：引出副线、主角遭遇重大挫折）"
-- "description": "严谨的剧情走向摘要"
+- "title": "精准的情节标题（动词+名词，暗示冲突）"
+- "estimated_chapters": 本幕预计占用的章数（整数）
+- "narrative_goal": "本幕在整个故事结构中承担的叙事功能"
+- "plot_points": ["情节点1", "情节点2", "情节点3"]（本幕包含的关键事件）
+- "description": "严谨的剧情走向摘要（含因果逻辑）"
+- "key_characters": ["角色ID"]（本幕涉及的角色，标注功能如：主角-李明）
+- "key_locations": ["地点ID"]（本幕发生的关键地点，标注功能）
+- "emotional_arc": "情绪曲线（如：平静→紧张→爆发）"
+- "setup_for": ["后续幕ID或标题"]（本幕为哪些后续幕做铺垫）
+- "payoff_from": ["前置幕ID或标题"]（本幕回收了哪些前置幕的伏笔）
 
-不要添加任何解释性文字，不要询问额外信息。"""
+不要添加任何解释性文字。"""
 
-        # 构建世界观上下文
-        worldview_context = "【世界观与人物】\n"
+        # 构建丰富的世界观上下文（与极速模式一致）
+        context_parts = []
+
+        # 世界观
         if bible_context.get("worldview"):
-            worldview_context += f"世界观：{bible_context['worldview']}\n"
-        if bible_context.get("characters"):
-            char_list = [f"- {c.get('name', 'Unknown')} (ID: {c.get('id', 'N/A')})" for c in bible_context['characters'][:5]]
-            worldview_context += "可用人物：\n" + "\n".join(char_list) + "\n"
-        if bible_context.get("locations"):
-            loc_list = [f"- {l.get('name', 'Unknown')} (ID: {l.get('id', 'N/A')})" for l in bible_context['locations'][:5]]
-            worldview_context += "可用地点：\n" + "\n".join(loc_list) + "\n"
+            context_parts.append(f"【世界观】\n{bible_context['worldview']}\n")
 
-        if worldview_context == "【世界观与人物】\n":
-            worldview_context = "【世界观与人物】\n暂无详细设定，请生成通用的结构框架。\n"
+        # 角色（带关系和弧光）
+        if bible_context.get("characters"):
+            chars = bible_context['characters']
+            char_lines = ["【角色设定】"]
+            for c in chars[:5]:
+                name = c.get('name', 'Unknown')
+                desc = c.get('description', '')
+                role = c.get('role', '')
+                arc = c.get('character_arc', '')
+                char_id = c.get('id', 'N/A')
+                char_lines.append(f"- {name} (ID: {char_id}) [{role}]: {desc}")
+                if arc:
+                    char_lines.append(f"  人物弧光: {arc}")
+            context_parts.append("\n".join(char_lines) + "\n")
+
+        # 角色关系
+        if bible_context.get("relationships"):
+            rel_lines = ["【角色关系】"]
+            for r in bible_context['relationships'][:5]:
+                char1 = r.get('character1', '')
+                char2 = r.get('character2', '')
+                rel_type = r.get('relationship_type', '')
+                rel_desc = r.get('description', '')
+                rel_lines.append(f"- {char1} ↔ {char2} ({rel_type}): {rel_desc}")
+            context_parts.append("\n".join(rel_lines) + "\n")
+
+        # 地点（带叙事功能）
+        if bible_context.get("locations"):
+            loc_lines = ["【关键地点】"]
+            for l in bible_context['locations'][:5]:
+                name = l.get('name', 'Unknown')
+                desc = l.get('description', '')
+                significance = l.get('significance', '')
+                loc_id = l.get('id', 'N/A')
+                loc_lines.append(f"- {name} (ID: {loc_id}): {desc}")
+                if significance:
+                    loc_lines.append(f"  叙事意义: {significance}")
+            context_parts.append("\n".join(loc_lines) + "\n")
+
+        # 时间线事件
+        if bible_context.get("timeline_notes"):
+            time_lines = ["【时间线事件】"]
+            for t in bible_context['timeline_notes'][:5]:
+                event = t.get('event', '')
+                desc = t.get('description', '')
+                impact = t.get('impact', '')
+                time_lines.append(f"- {event}: {desc}")
+                if impact:
+                    time_lines.append(f"  情节影响: {impact}")
+            context_parts.append("\n".join(time_lines) + "\n")
+
+        if not context_parts:
+            context_parts.append("【世界观与人物】\n暂无详细设定，请生成通用的结构框架，但仍需严格遵守结构网格。\n")
+
+        worldview_context = "\n".join(context_parts)
 
         user_msg = f"""<STORY_CONTEXT>
 {worldview_context}
@@ -845,23 +1169,30 @@ class ContinuousPlanningService:
 <STRUCTURAL_GRID>
 【你必须绝对服从的物理网格】
 - 目标总章数：{target_chapters} 章
-- 结构分布：{parts} 部 × {volumes_per_part} 卷/部 × {acts_per_volume} 幕/卷
+- 结构分布：{parts} 部 × {volumes_per_part} 卷/部 × {acts_per_volume} 幕/卷 = {total_acts} 幕
+- 平均每幕：约 {avg_chapters_per_act} 章
 </STRUCTURAL_GRID>
 
 请生成严格符合上述网格的叙事结构，JSON格式：
 {{
   "parts": [
     {{
-      "title": "部标题",
+      "title": "部标题（动词+名词，暗示部内核心冲突）",
       "volumes": [
         {{
-          "title": "卷标题",
+          "title": "卷标题（体现卷内叙事重心）",
           "acts": [
             {{
-              "title": "幕标题",
-              "estimated_chapters": 25,
-              "narrative_goal": "叙事功能",
-              "description": "剧情摘要"
+              "title": "幕标题（如：青铜门下的背叛）",
+              "estimated_chapters": 5,
+              "narrative_goal": "本幕在整体结构中的功能",
+              "plot_points": ["情节点1", "情节点2"],
+              "description": "剧情摘要（含因果逻辑）",
+              "key_characters": ["角色ID-功能标注"],
+              "key_locations": ["地点ID-功能标注"],
+              "emotional_arc": "情绪曲线",
+              "setup_for": ["后续幕标题"],
+              "payoff_from": ["前置幕标题"]
             }}
           ]
         }}
