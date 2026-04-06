@@ -17,9 +17,6 @@
       <AutopilotPanel :novel-id="slug" @status-change="handleAutopilotStatusChange" />
     </div>
 
-    <header class="work-subheader">
-    </header>
-
     <div class="work-main">
       <div v-if="currentChapter" class="chapter-editor">
         <div class="editor-header">
@@ -649,9 +646,9 @@ const stopGenerate = () => {
 }
 
 .autopilot-container {
-  padding: 12px 20px;
+  padding: 16px 20px;
+  background: linear-gradient(to bottom, var(--app-surface) 0%, rgba(24, 160, 88, 0.02) 100%);
   border-bottom: 1px solid var(--aitext-split-border);
-  background: var(--app-surface);
 }
 
 .work-main {
