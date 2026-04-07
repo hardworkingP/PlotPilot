@@ -51,6 +51,9 @@ class SubtextEntryResponse(BaseModel):
     sensory_anchors: Dict[str, str]
     status: str
     consumed_at_chapter: Optional[int]
+    suggested_resolve_chapter: Optional[int] = None  # 预期回收章节
+    resolve_chapter_window: Optional[int] = None  # 宽容窗口
+    importance: str = "medium"  # 重要性
     created_at: str
 
 
@@ -98,6 +101,9 @@ def _entry_to_response(entry: SubtextLedgerEntry) -> SubtextEntryResponse:
         sensory_anchors=entry.sensory_anchors,
         status=entry.status,
         consumed_at_chapter=entry.consumed_at_chapter,
+        suggested_resolve_chapter=getattr(entry, 'suggested_resolve_chapter', None),
+        resolve_chapter_window=getattr(entry, 'resolve_chapter_window', None),
+        importance=getattr(entry, 'importance', 'medium'),
         created_at=entry.created_at.isoformat()
     )
 
