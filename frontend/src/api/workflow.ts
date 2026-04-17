@@ -127,6 +127,7 @@ export interface GenerateChapterWorkflowResponse {
   word_control?: WordControlDTO
   style_warnings?: StyleWarning[]
   ghost_annotations?: unknown[]
+  seam_rewrite_info?: Record<string, unknown>
 }
 
 export interface WordControlDTO {
@@ -153,7 +154,8 @@ export interface ChunkStats {
 export type GenerateChapterStreamEvent =
   | { type: 'phase'; phase: 'planning' | 'context' | 'llm' | 'post' }
   | { type: 'chunk'; text: string; stats: ChunkStats }
-  | { type: 'done'; content: string; consistency_report: ConsistencyReportDTO; token_count: number; output_tokens: number; total_tokens: number; chars: number; target_word_count?: number; actual_word_count?: number; word_control?: WordControlDTO; style_warnings?: StyleWarning[]; ghost_annotations?: unknown[] }
+  | { type: 'done'; content: string; consistency_report: ConsistencyReportDTO; token_count: number; output_tokens: number; total_tokens: number; chars: number; target_word_count?: number; actual_word_count?: number; word_control?: WordControlDTO; style_warnings?: StyleWarning[]; ghost_annotations?: unknown[]; seam_rewrite_info?: Record<string, unknown> }
+  | { type: 'needs_manual_revision'; reason: string; message: string; content: string; consistency_report: ConsistencyReportDTO; token_count: number; style_warnings?: StyleWarning[]; ghost_annotations?: unknown[]; seam_rewrite_info?: Record<string, unknown> }
   | { type: 'warning'; warning_type: string; message: string; target_word_count?: number; recommended_min?: number; recommended_max?: number }
   | { type: 'error'; message: string }
 
@@ -178,6 +180,7 @@ export async function consumeGenerateChapterStream(
     onPhase?: (phase: string) => void
     onChunk?: (text: string, stats?: ChunkStats) => void
     onDone?: (result: GenerateChapterWorkflowResponse) => void
+    onNeedsManualRevision?: (result: GenerateChapterWorkflowResponse & { message: string; reason: string }) => void
     onError?: (message: string) => void
     signal?: AbortSignal
   }
@@ -243,6 +246,9 @@ export async function consumeGenerateChapterStream(
             if (o.ghost_annotations != null) {
               result.ghost_annotations = o.ghost_annotations as unknown[]
             }
+            if (o.seam_rewrite_info && typeof o.seam_rewrite_info === 'object') {
+              result.seam_rewrite_info = o.seam_rewrite_info as Record<string, unknown>
+            }
             const ev: GenerateChapterStreamEvent = {
               type: 'done',
               ...result,
@@ -252,6 +258,35 @@ export async function consumeGenerateChapterStream(
             }
             handlers.onEvent?.(ev)
             handlers.onDone?.(result)
+            return
+          } else if (typ === 'needs_manual_revision') {
+            const rawReport = o.consistency_report
+            const consistency_report: ConsistencyReportDTO =
+              rawReport && typeof rawReport === 'object'
+                ? (rawReport as ConsistencyReportDTO)
+                : { issues: [], warnings: [], suggestions: [] }
+            const result: GenerateChapterWorkflowResponse & { message: string; reason: string } = {
+              content: String(o.content ?? ''),
+              consistency_report,
+              token_count: Number(o.token_count ?? 0),
+              message: String(o.message ?? '需要人工修订'),
+              reason: String(o.reason ?? 'manual_revision_required'),
+            }
+            if (Array.isArray(o.style_warnings)) {
+              result.style_warnings = o.style_warnings as StyleWarning[]
+            }
+            if (o.ghost_annotations != null) {
+              result.ghost_annotations = o.ghost_annotations as unknown[]
+            }
+            if (o.seam_rewrite_info && typeof o.seam_rewrite_info === 'object') {
+              result.seam_rewrite_info = o.seam_rewrite_info as Record<string, unknown>
+            }
+            const ev: GenerateChapterStreamEvent = {
+              type: 'needs_manual_revision',
+              ...result,
+            }
+            handlers.onEvent?.(ev)
+            handlers.onNeedsManualRevision?.(result)
             return
           } else if (typ === 'warning') {
             const ev: GenerateChapterStreamEvent = {

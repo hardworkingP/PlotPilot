@@ -62,6 +62,7 @@ class ContextBuilder:
         chapter_element_repository=None,
         triple_repository=None,
         theme_agent=None,
+        knowledge_repository=None,
     ):
         self.bible_service = bible_service
         self.storyline_manager = storyline_manager
@@ -77,6 +78,7 @@ class ContextBuilder:
         self.chapter_element_repository = chapter_element_repository
         self.triple_repository = triple_repository
         self.theme_agent = theme_agent  # ThemeAgent 插槽
+        self.knowledge_repository = knowledge_repository
 
         # 预算分配器（核心组件）
         self.budget_allocator = ContextBudgetAllocator(
@@ -89,6 +91,7 @@ class ContextBuilder:
             vector_store=vector_store,
             embedding_service=embedding_service,
             theme_agent=theme_agent,
+            knowledge_repository=knowledge_repository,
         )
 
     def build_voice_anchor_system_section(self, novel_id: str) -> str:

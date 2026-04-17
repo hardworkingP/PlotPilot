@@ -1,3 +1,4 @@
+"""AutopilotDaemon 辅助逻辑测试"""
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -109,3 +110,28 @@ async def test_handle_writing_persists_word_control_metrics(action: str):
     assert upsert_args[2]["within_tolerance"] is True
     assert novel.current_stage == NovelStage.AUDITING
     assert novel.current_auto_chapters == 1
+
+
+def test_get_latest_completed_chapter_prefers_highest_number():
+    """审计阶段应按真实章节号选择最近完成章节。"""
+    chapters = [
+        Mock(number=11, status=Mock(value="completed")),
+        Mock(number=12, status=Mock(value="draft")),
+        Mock(number=13, status=Mock(value="completed")),
+    ]
+
+    chapter = AutopilotDaemon._get_latest_completed_chapter(chapters)
+
+    assert chapter.number == 13
+
+
+def test_get_latest_completed_chapter_returns_none_when_no_completed():
+    """没有完成章节时应返回 None。"""
+    chapters = [
+        Mock(number=11, status=Mock(value="draft")),
+        Mock(number=12, status=Mock(value="reviewing")),
+    ]
+
+    chapter = AutopilotDaemon._get_latest_completed_chapter(chapters)
+
+    assert chapter is None
