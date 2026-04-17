@@ -844,6 +844,8 @@ onUnmounted(() => {
 
 .kp-subtabs :deep(.n-tab-pane) {
   padding-top: 6px;
+  overflow-y: auto;
+  max-height: 100%;
 }
 
 .kp-section {
